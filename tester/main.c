@@ -94,6 +94,8 @@ int main(int argc, char** argv)
 	if (result_code) free(result_code);
 	if (program_buffer) free(program_buffer);
 	cyberiada_ursula_checker_free(checker);
+
+	fclose(f);
 	
 	return res;
 }
