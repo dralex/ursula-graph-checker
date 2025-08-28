@@ -282,6 +282,7 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 	CyberiadaNode *new_initial = NULL, **sm_diff_nodes = NULL, **sm1_missing_nodes = NULL, **sm2_new_nodes = NULL;
 	CyberiadaEdge **sm_diff_edges = NULL, **sm2_new_edges = NULL, **sm1_missing_edges = NULL;
 	size_t *sm_diff_nodes_flags = NULL, *sm_diff_edges_flags = NULL;
+	size_t i;
 	
 	if (!checker || !task_name || !program_buffer) {
 		fprintf(stderr, "Bad check program arguments!\n");
@@ -345,9 +346,36 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 			*result = URSULA_CHECK_RESULT_OK;
 		}
 	} else if (result_flags & CYBERIADA_ISOMORPH_FLAG_ISOMORPHIC_MASK) {
-		if (result) {
-			*result = URSULA_CHECK_RESULT_PARTIAL;
-		}		
+		
+		int diff_actions = 0;
+
+		for (i = 0; i < sm_diff_nodes_size; i++) {
+			if (sm_diff_nodes_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
+				fprintf(stderr, "node %s with diff actions found!\n", sm_diff_nodes[i]->id);
+				diff_actions = 1;
+				break;
+			}
+		}
+
+		if (!diff_actions) {
+			for (i = 0; i < sm_diff_edges_size; i++) {
+				if (sm_diff_edges_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
+					fprintf(stderr, "edge %s with diff actions found!\n", sm_diff_edges[i]->id);
+					diff_actions = 1;
+					break;
+				}
+			}
+		}
+		
+		if (!diff_actions) {
+			if (result) {
+				*result = URSULA_CHECK_RESULT_OK;
+			}
+		} else {
+			if (result) {
+				*result = URSULA_CHECK_RESULT_PARTIAL;
+			}
+		}
 	} else {
 		if (result) {
 			*result = URSULA_CHECK_RESULT_ERROR;
