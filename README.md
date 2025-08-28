@@ -1,4 +1,4 @@
-= Ursula game engine HSM programs checker =
+# Ursula game engine HSM programs checker
 
 Requirements:
 
