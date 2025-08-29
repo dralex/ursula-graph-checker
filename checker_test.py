@@ -35,9 +35,9 @@ def generate_sha256(secret, task, salt, result):
     return h.hexdigest()
 
 def test_graph(secret, task, result, graph):
-    salt = 99 # random.randint(1, 100000)
+    salt = random.randint(1, 100000)
 
-    print('Runnig checker {} {}...'.format(task, graph), end='')
+    print('Runnig checker {} {} with salt {}...'.format(task, graph, salt), end='')
     res, code = run_checker(task, salt, graph)
     assert res == result, "Wrong result {} (expected {}) while testing graph {}".format(res, result, graph)
     sha = generate_sha256(secret, task, salt, result)
