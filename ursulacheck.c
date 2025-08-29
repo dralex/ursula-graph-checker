@@ -32,20 +32,44 @@
  * The internal structure
  * ----------------------------------------------------------------------------- */
 
+#define CYBML_DELTA_ARG             0x1
+#define CYBML_DELTA_ORDER           0x2
+#define CYBML_DELTA_MISS            0x4
+#define CYBML_DELTA_EDGETO          0x8
+#define CYBML_DELTA_ACTION          0x10
+
+#define CYBML_DELTA_ARG_STR         "ARG"
+#define CYBML_DELTA_ORDER_STR       "ORDER"
+#define CYBML_DELTA_MISS_STR        "MISS"
+#define CYBML_DELTA_EDGETO_STR      "EDGETO"
+#define CYBML_DELTA_ACTION_STR      "ACTION"
+
+#define CYBML_DELTA_PREFIX_ALLOWED  '+'
+#define CYBML_DELTA_PREFIX_REQUIRED '~'
+
+typedef struct _UrsulaCheckerDelta {
+    char*                           node_id;
+	int                             allowed_flags;
+	int                             required_flags;
+	struct _UrsulaCheckerDelta*     next;
+} UrsulaCheckerDelta;
+
 typedef struct _UrsulaCheckerTask {
-	char*                         name;      /* task identifier */
-	CyberiadaDocument*            valid_doc; /* the valid graphml document (w/o geometry) */
-	struct _UrsulaCheckerTask*    next;
+	char*                           name;      /* task identifier */
+	CyberiadaDocument*              valid_doc; /* the valid graphml document (w/o geometry) */
+	UrsulaCheckerDelta*             deltas;    /* allowed/required deltas in the document */
+	struct _UrsulaCheckerTask*      next;
 } UrsulaCheckerTask;
 
 struct _UrsulaCheckerData {
-	char*                         secret;
-	UrsulaCheckerTask*            tasks;
+	char*                           secret;    /* the global secret */
+	UrsulaCheckerTask*              tasks;
 };
 
-#define MAX_STR_LEN   4096
-#define DELIMITER     ':'
-#define SECRET_STRING "secret"
+#define MAX_STR_LEN      4096
+#define DELIMITER        ':'
+#define SECRET_STRING    "secret"
+#define DELTA_DELIMITERS "|"
 
 /* -----------------------------------------------------------------------------
  * The checker library functions
@@ -74,7 +98,7 @@ static int copy_string(char** target, size_t* size, const char* source)
 	return URSULA_CHECK_NO_ERROR;
 }
 
-int cyberiada_decode_buffer(CyberiadaDocument** doc, const char* buffer)
+static int cyberiada_decode_buffer(CyberiadaDocument** doc, const char* buffer)
 {
 	int res;
 
@@ -99,7 +123,7 @@ int cyberiada_decode_buffer(CyberiadaDocument** doc, const char* buffer)
 	return URSULA_CHECK_NO_ERROR;
 }
 
-int cyberiada_read_graph_file(CyberiadaDocument** doc, const char* graphml_file)
+static int cyberiada_read_graph_file(CyberiadaDocument** doc, const char* graphml_file)
 {
 	FILE*  f;
 	char*  buffer;
@@ -143,6 +167,75 @@ int cyberiada_read_graph_file(CyberiadaDocument** doc, const char* graphml_file)
 	return res;	
 }
 
+static int cyberiada_collect_deltas(UrsulaCheckerDelta** deltas, CyberiadaNode* nodes)
+{
+	CyberiadaNode* n;
+	int res;
+	
+	if (!deltas) {
+		return URSULA_CHECK_BAD_PARAMETERS;
+	}
+	
+	for (n = nodes; n; n = n->next) {
+		if (n->title) {
+			/* printf("Collect deltas %s for %s\n", n->title, n->id); */
+			int allowed_flags = 0, required_flags = 0;
+			char *s = strtok(n->title, DELTA_DELIMITERS);
+			s = strtok(NULL, DELTA_DELIMITERS); /* go to the second token */
+			while(s) {
+				int flag = 0;
+				if (strstr(s, CYBML_DELTA_ARG_STR)) {
+					flag = CYBML_DELTA_ARG;
+				} else if (strstr(s, CYBML_DELTA_ORDER_STR)) {
+					flag = CYBML_DELTA_ORDER;
+				} else if (strstr(s, CYBML_DELTA_MISS_STR)) {
+					flag = CYBML_DELTA_MISS;
+				} else if (strstr(s, CYBML_DELTA_EDGETO_STR)) {
+					flag = CYBML_DELTA_EDGETO;
+				} else if (strstr(s, CYBML_DELTA_ACTION_STR)) {
+					flag = CYBML_DELTA_ACTION;
+				} else {
+					fprintf(stderr, "Error while collecting deltas: unknown token %s in the node %s",
+							s, n->id);
+					return URSULA_CHECK_BAD_PARAMETERS;
+				}
+				if (*s == CYBML_DELTA_PREFIX_ALLOWED) {
+					allowed_flags |= flag;
+				} else if (*s == CYBML_DELTA_PREFIX_REQUIRED) {
+					required_flags |= flag;
+				} else {
+					fprintf(stderr, "Error while collecting deltas: unknown token prefix %c in the node %s",
+							*s, n->id);
+					return URSULA_CHECK_BAD_PARAMETERS;
+				}
+				s = strtok(NULL, DELTA_DELIMITERS);
+			}
+			if (allowed_flags || required_flags) {
+				UrsulaCheckerDelta* d = (UrsulaCheckerDelta*)malloc(sizeof(UrsulaCheckerDelta));
+				memset(d, 0, sizeof(UrsulaCheckerDelta));
+				copy_string(&(d->node_id), NULL, n->id);
+				d->allowed_flags = allowed_flags;
+				d->required_flags = required_flags;
+				if (*deltas) {
+					UrsulaCheckerDelta* last = *deltas;
+					while (last->next) last = last->next;
+					last->next = d;
+				} else {
+					*deltas = d;
+				}
+				/* printf("\tAdd deltas a: %d r: %d\n", allowed_flags, required_flags); */
+			}
+		}
+		if (n->children) {
+			if ((res = cyberiada_collect_deltas(deltas, n->children)) != URSULA_CHECK_NO_ERROR) {
+				return res;
+			}
+		}
+	}
+	
+	return URSULA_CHECK_NO_ERROR;
+}
+
 int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* config_file)
 {
 	FILE* cfg;
@@ -156,6 +249,7 @@ int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* confi
 
 	cfg = fopen(config_file, "r");
 	if (!cfg) {
+		fprintf(stderr, "Cannot open config file %s\n", config_file);
 		return URSULA_CHECK_BAD_PARAMETERS;		
 	}
 	buffer = (char*)malloc(sizeof(char) * MAX_STR_LEN);
@@ -192,11 +286,16 @@ int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* confi
 				
 				res = cyberiada_read_graph_file(&(task->valid_doc), graphml);
 				if (res != URSULA_CHECK_NO_ERROR) {
+					fprintf(stderr, "Cannot read graph file %s from config: %d\n", graphml, res);
 					if(task->name) free(task->name);
 					free(task);
 					continue;
 				}
-			
+				if (task->valid_doc->state_machines) {
+					cyberiada_collect_deltas(&(task->deltas),
+											 task->valid_doc->state_machines->nodes);
+				}
+
 				if (!last_task) {
 					(*checker)->tasks = task;
 				} else {
@@ -210,18 +309,67 @@ int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* confi
 	fclose(cfg);
 	free(buffer);
 
+#ifdef __DEBUG__
 	printf("Checker initialized:\n");
 	printf("Secret: %s\n", (*checker)->secret);
 	printf("Tasks:\n");
 	last_task = (*checker)->tasks;
 	while (last_task) {
+		UrsulaCheckerDelta* d;
+		
 		printf("\t%s\tSM %s\n",
 			   last_task->name,
 			   last_task->valid_doc->state_machines->nodes->id);
+		printf("\tDeltas:\n");
+		d = last_task->deltas;
+		while (d) {
+			printf("\t\t%s", d->node_id);
+			if (d->allowed_flags) {
+				int allowed_flags = d->allowed_flags;
+				printf(" allowed: ");
+				if (allowed_flags & CYBML_DELTA_ARG) {
+					printf("A");
+				}
+				if (allowed_flags & CYBML_DELTA_ORDER) {
+					printf("O");
+				}
+				if (allowed_flags & CYBML_DELTA_MISS) {
+					printf("M");
+				}
+				if (allowed_flags & CYBML_DELTA_EDGETO) {
+					printf("E");
+				}
+				if (allowed_flags & CYBML_DELTA_ACTION) {
+					printf("C");
+				}
+			}
+			if (d->required_flags) {
+				int required_flags = d->required_flags;
+				printf(" required: ");
+				if (required_flags & CYBML_DELTA_ARG) {
+					printf("A");
+				}
+				if (required_flags & CYBML_DELTA_ORDER) {
+					printf("O");
+				}
+				if (required_flags & CYBML_DELTA_MISS) {
+					printf("M");
+				}
+				if (required_flags & CYBML_DELTA_EDGETO) {
+					printf("E");
+				}
+				if (required_flags & CYBML_DELTA_ACTION) {
+					printf("C");
+				}
+			}
+			printf("\n");
+			d = d->next;
+		}
 		last_task = last_task->next;
 	}
 	printf("\n");
-
+#endif
+	
 	return URSULA_CHECK_NO_ERROR;
 }
 	
@@ -240,6 +388,12 @@ int cyberiada_ursula_checker_free(UrsulaCheckerData* checker)
 		next = task->next;
 		if (task->name) free(task->name);
 		cyberiada_destroy_sm_document(task->valid_doc);
+		while (task->deltas) {
+			UrsulaCheckerDelta* d = task->deltas;
+			task->deltas = task->deltas->next;
+			free(d->node_id);
+			free(d);
+		}
 		free(task);
 		task = next;
 	}
