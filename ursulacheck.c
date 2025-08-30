@@ -433,8 +433,10 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 	int result_flags;
 	size_t sm_diff_nodes_size = 0, sm2_new_nodes_size = 0, sm1_missing_nodes_size = 0,
 		sm_diff_edges_size = 0, sm2_new_edges_size = 0, sm1_missing_edges_size = 0;
-	CyberiadaNode *new_initial = NULL, **sm_diff_nodes = NULL, **sm1_missing_nodes = NULL, **sm2_new_nodes = NULL;
-	CyberiadaEdge **sm_diff_edges = NULL, **sm2_new_edges = NULL, **sm1_missing_edges = NULL;
+	CyberiadaNode *new_initial = NULL, **sm1_missing_nodes = NULL, **sm2_new_nodes = NULL;
+	CyberiadaNodePair *sm_diff_nodes = NULL;
+	CyberiadaEdge **sm2_new_edges = NULL, **sm1_missing_edges = NULL;
+	CyberiadaEdgePair *sm_diff_edges = NULL;
 	size_t *sm_diff_nodes_flags = NULL, *sm_diff_edges_flags = NULL;
 	size_t i;
 	
@@ -496,6 +498,7 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 	
 	if (result_flags & (CYBERIADA_ISOMORPH_FLAG_IDENTICAL |
 						CYBERIADA_ISOMORPH_FLAG_EQUAL)) {
+		/* The presented graph is actually the same as the required */
 		if (result) {
 			*result = URSULA_CHECK_RESULT_OK;
 		}
@@ -505,7 +508,7 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 
 		for (i = 0; i < sm_diff_nodes_size; i++) {
 			if (sm_diff_nodes_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
-				fprintf(stderr, "node %s with diff actions found!\n", sm_diff_nodes[i]->id);
+				fprintf(stderr, "node %s with diff actions found!\n", sm_diff_nodes[i].n1->id);
 				diff_actions = 1;
 				break;
 			}
@@ -514,7 +517,7 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 		if (!diff_actions) {
 			for (i = 0; i < sm_diff_edges_size; i++) {
 				if (sm_diff_edges_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
-					fprintf(stderr, "edge %s with diff actions found!\n", sm_diff_edges[i]->id);
+					fprintf(stderr, "edge %s with diff actions found!\n", sm_diff_edges[i].e1->id);
 					diff_actions = 1;
 					break;
 				}
