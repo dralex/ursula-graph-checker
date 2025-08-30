@@ -58,7 +58,7 @@ if __name__ == '__main__':
         if row[0] == CHECKER_SECRET_STRING:
             Secret = row[1].strip()
         else:
-            Tasks.append((row[0], 3, row[1].strip())) # add all correst scripts as valid tasks
+            Tasks.append((row[0], 3, row[1].strip())) # add all correst scripts as valid test tasks
 
     if Secret is None:
         print('Bad config, cannot find the secret string')
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     reader = csv.reader(open(CHECKER_TESTS), delimiter=DELIMITER)
     for row in reader:
         if len(row) != 3: continue
-        Tasks.append((row[0], int(row[1]), row[2].strip())) # add all correst scripts as valid tasks
+        Tasks.append((row[0], int(row[1]), row[2].strip())) # add the tests
 
     print('Testing (total {}):'.format(len(Tasks)))
     for t in Tasks:
