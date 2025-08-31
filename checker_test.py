@@ -20,14 +20,17 @@ def run_checker(task, salt, graph):
     result = None
     code = None
     with subprocess.Popen([CHECKER_COMMAND, CHECKER_CONFIG, task, str(salt), graph],
-                          stdout=subprocess.PIPE) as proc:
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+        outstr = ''
         for line in proc.stdout.readlines():
             line = str(line, 'utf-8').strip()
+            outstr += line + '\n'
             if line.find(CHECKER_RESULT) == 0:
                 result = int(line[len(CHECKER_RESULT):].strip())
             elif line.find(CHECKER_RESULT_CODE) == 0:
                 code = line[len(CHECKER_RESULT_CODE):].strip()
-    return (result, code)
+        errstr = str(proc.stderr.read(), 'utf-8')
+    return (result, code, outstr, errstr)
 
 def generate_sha256(secret, task, salt, result):
     h = hashlib.new('sha256')
@@ -37,12 +40,20 @@ def generate_sha256(secret, task, salt, result):
 def test_graph(secret, task, result, graph):
     salt = random.randint(1, 100000)
 
-    print('Runnig checker {} {} with salt {}...'.format(task, graph, salt), end='')
-    res, code = run_checker(task, salt, graph)
-    assert res == result, "Wrong result {} (expected {}) while testing graph {}".format(res, result, graph)
+    print('Runnig checker {} {} with salt {}... '.format(task, graph, salt), end='')
+    res, code, outstr, errstr = run_checker(task, salt, graph)
+    if res != result:
+        print("Wrong result {} (expected {}) while testing graph {}".format(res, result, graph))
+        print("Output:\n{}\n".format(outstr))
+        print("Errors:\n{}\n".format(errstr))
+        sys.exit(1)
     sha = generate_sha256(secret, task, salt, result)
-    assert code == sha, "Wrong result code '{}' (expected '{}') while testing graph {}".format(code, sha, graph)
-    print(' OK')
+    if code != sha:
+        print("Wrong result code '{}' (expected '{}') while testing graph {}".format(code, sha, graph))
+        print("Output:\n{}\n".format(outstr))
+        print("Errors:\n{}\n".format(errstr))
+        sys.exit(1)        
+    print('OK')
     
 if __name__ == '__main__':
 
