@@ -28,6 +28,20 @@
 #include <cyberiada/cyberiadaml.h>
 #include "sha256.h"
 
+#ifdef __DEBUG__
+#include <stdio.h>
+#define DEBUG(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define DEBUG(...)
+#endif
+
+#ifndef __SILENT__
+#include <stdio.h>
+#define ERROR(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define ERROR(...)
+#endif
+
 /* -----------------------------------------------------------------------------
  * The internal structure
  * ----------------------------------------------------------------------------- */
@@ -71,6 +85,8 @@ struct _UrsulaCheckerData {
 #define SECRET_STRING    "secret"
 #define DELTA_DELIMITERS "|"
 
+#define MIN(a,b)         (((a)<(b))?(a):(b))
+
 /* -----------------------------------------------------------------------------
  * The checker library functions
  * ----------------------------------------------------------------------------- */
@@ -103,15 +119,16 @@ static int cyberiada_decode_buffer(CyberiadaDocument** doc, const char* buffer)
 	int res;
 
 	if (!doc || !buffer) {
-		fprintf(stderr, "Bad parameters for decoding GraphML document\n");
+		ERROR("Bad parameters for decoding GraphML document\n");
 		return URSULA_CHECK_BAD_PARAMETERS;
 	}
 	
 	*doc = cyberiada_new_sm_document();
 	res = cyberiada_decode_sm_document(*doc, buffer, strlen(buffer),
-									   cybxmlCyberiada10, CYBERIADA_FLAG_SKIP_GEOMETRY);
+									   cybxmlCyberiada10,
+									   CYBERIADA_FLAG_SKIP_GEOMETRY | CYBERIADA_FLAG_SKIP_EMPTY_BEHAVIOR);
 	if (res != CYBERIADA_NO_ERROR) {
-		fprintf(stderr, "Error while decodnig GraphML document: %d\n", res);
+		ERROR("Error while decodnig GraphML document: %d\n", res);
 		cyberiada_destroy_sm_document(*doc);
 		if (res == CYBERIADA_BAD_PARAMETER) {
 			return URSULA_CHECK_BAD_PARAMETERS;
@@ -131,14 +148,14 @@ static int cyberiada_read_graph_file(CyberiadaDocument** doc, const char* graphm
 	int    res;
 
 	if (!doc) {
-		fprintf(stderr, "Bad document parameter for decoding GraphML file\n");
+		ERROR("Bad document parameter for decoding GraphML file\n");
 		return URSULA_CHECK_BAD_PARAMETERS;
 	}
 
 	f = fopen(graphml_file, "r");
 
 	if (!f) {
-		fprintf(stderr, "Cannot open GraphML file %s for decoding\n", graphml_file);
+		ERROR("Cannot open GraphML file %s for decoding\n", graphml_file);
 		return URSULA_CHECK_BAD_PARAMETERS;
 	}
 
@@ -152,7 +169,7 @@ static int cyberiada_read_graph_file(CyberiadaDocument** doc, const char* graphm
 		if (r < size) {
 			free(buffer);
 			fclose(f);
-			fprintf(stderr, "Cannot read GraphML file %s for decoding\n", graphml_file);
+			ERROR("Cannot read GraphML file %s for decoding\n", graphml_file);
 			return URSULA_CHECK_BAD_PARAMETERS;
 		}
 		size -= r;
@@ -178,7 +195,7 @@ static int cyberiada_collect_deltas(UrsulaCheckerDelta** deltas, CyberiadaNode* 
 	
 	for (n = nodes; n; n = n->next) {
 		if (n->title) {
-			/* printf("Collect deltas %s for %s\n", n->title, n->id); */
+			/* DEBUG("Collect deltas %s for %s\n", n->title, n->id); */
 			int allowed_flags = 0, required_flags = 0;
 			char *s = strtok(n->title, DELTA_DELIMITERS);
 			s = strtok(NULL, DELTA_DELIMITERS); /* go to the second token */
@@ -195,8 +212,8 @@ static int cyberiada_collect_deltas(UrsulaCheckerDelta** deltas, CyberiadaNode* 
 				} else if (strstr(s, CYBML_DELTA_ACTION_STR)) {
 					flag = CYBML_DELTA_ACTION;
 				} else {
-					fprintf(stderr, "Error while collecting deltas: unknown token %s in the node %s",
-							s, n->id);
+					ERROR("Error while collecting deltas: unknown token %s in the node %s",
+						  s, n->id);
 					return URSULA_CHECK_BAD_PARAMETERS;
 				}
 				if (*s == CYBML_DELTA_PREFIX_ALLOWED) {
@@ -204,8 +221,8 @@ static int cyberiada_collect_deltas(UrsulaCheckerDelta** deltas, CyberiadaNode* 
 				} else if (*s == CYBML_DELTA_PREFIX_REQUIRED) {
 					required_flags |= flag;
 				} else {
-					fprintf(stderr, "Error while collecting deltas: unknown token prefix %c in the node %s",
-							*s, n->id);
+					ERROR("Error while collecting deltas: unknown token prefix %c in the node %s",
+						  *s, n->id);
 					return URSULA_CHECK_BAD_PARAMETERS;
 				}
 				s = strtok(NULL, DELTA_DELIMITERS);
@@ -223,7 +240,7 @@ static int cyberiada_collect_deltas(UrsulaCheckerDelta** deltas, CyberiadaNode* 
 				} else {
 					*deltas = d;
 				}
-				/* printf("\tAdd deltas a: %d r: %d\n", allowed_flags, required_flags); */
+				/* DEBUG("\tAdd deltas a: %d r: %d\n", allowed_flags, required_flags); */
 			}
 		}
 		if (n->children) {
@@ -233,6 +250,147 @@ static int cyberiada_collect_deltas(UrsulaCheckerDelta** deltas, CyberiadaNode* 
 		}
 	}
 	
+	return URSULA_CHECK_NO_ERROR;
+}
+
+static int cyberiada_node_deltas_flags(UrsulaCheckerDelta* deltas, const char* node_id, int* allowed_flags, int* required_flags)
+{
+	if (!node_id) {
+		return URSULA_CHECK_BAD_PARAMETERS;		
+	}
+
+	while (deltas) {
+		if (strcmp(deltas->node_id, node_id) == 0) {
+			if (allowed_flags) *allowed_flags = deltas->allowed_flags; 
+			if (required_flags) *required_flags = deltas->required_flags;
+			return URSULA_CHECK_NO_ERROR;
+		}
+		deltas = deltas->next;
+	}
+
+	return URSULA_CHECK_BAD_PARAMETERS;	
+}
+
+static int cyberiada_command_arguments_differ(const char* command1, const char* command2)
+{
+	int bracket = 0;
+	DEBUG("Comparing commands with arguments %s and %s\n", command1, command2);
+	for (; *command1 && *command2; command1++, command2++) {
+		if (*command1 == *command2) {
+			if (!bracket && *command1 == '(') { 
+				bracket = 1;
+			}
+		} else if (!bracket) {
+			return 0;
+		} else {
+			return strcmp(command1, command2);
+		}
+	}
+	return 0;
+}
+
+static int cyberiada_compare_action_behaviors(const char* behavior1, const char* behavior2, int* compare_flags)
+{
+	char *buffer1 = NULL, *buffer2 = NULL;
+	char **commands1 = NULL, **commands2 = NULL;
+	size_t i, j, commands1_size = 0, commands2_size = 0;
+	char* c;
+	
+	copy_string(&buffer1, NULL, behavior1);
+	commands1_size = 1;
+	c = buffer1;
+	while (*c) {
+		if (*c == '\n') commands1_size++; 
+		c++;
+	}
+	copy_string(&buffer2, NULL, behavior2);
+	commands2_size = 1;
+	c = buffer2;
+	while (*c) {
+		if (*c == '\n') commands2_size++; 
+		c++;
+	}
+
+	if (commands1_size != commands2_size && compare_flags) {
+		*compare_flags |= CYBML_DELTA_ACTION;
+	}
+	
+	commands1 = (char**)malloc(sizeof(char*) * commands1_size);
+	commands1[0] = buffer1;
+	for (i = 1, c = buffer1; *c && i < commands1_size; c++) { 
+		if (*c == '\n') {
+			*c = 0;
+			commands1[i++] = c + 1;
+		}
+	}
+
+	commands2 = (char**)malloc(sizeof(char*) * commands2_size);
+	commands2[0] = buffer2;
+	for (i = 1, c = buffer2; *c && i < commands2_size; c++) { 
+		if (*c == '\n') {
+			*c = 0;
+			commands2[i++] = c + 1;
+		}
+	}
+
+	for (i = 0; i < commands1_size; i++) {
+		for (j = 0; j < commands2_size; j++) {
+			if (strcmp(commands1[i], commands2[j]) == 0) {
+				if (i != j && compare_flags) {
+					*compare_flags |= CYBML_DELTA_ORDER;				
+				}
+				break;
+			} else if (cyberiada_command_arguments_differ(commands1[i], commands2[j])) {
+				
+				if (compare_flags) {
+					*compare_flags |= CYBML_DELTA_ARG;
+				}
+				break;				
+			}
+		}
+	}
+	
+	if (buffer1) free(buffer1);
+	if (buffer2) free(buffer2);
+	if (commands1) free(commands1);
+	if (commands2) free(commands2);
+	
+	return URSULA_CHECK_NO_ERROR;
+}
+
+static int cyberiada_compare_node_actions(CyberiadaAction* n1action, CyberiadaAction* n2action, int* compare_flags)
+{
+	CyberiadaAction *a1, *a2;
+
+	if (!n1action && !n2action) {
+		if (compare_flags) *compare_flags = 0;
+		return URSULA_CHECK_NO_ERROR;
+	}
+	if ((n1action && !n2action) || (!n1action && n2action)) {
+		if (compare_flags) *compare_flags = CYBML_DELTA_ACTION;		
+		return URSULA_CHECK_NO_ERROR;
+	}
+
+	for (a1 = n1action; a1; a1 = a1->next) {
+		int found = 0;
+		for (a2 = n2action; a2; a2 = a2->next) {
+			if (a1->type == a2->type &&
+				(a2->type != cybActionTransition || strcmp(a1->trigger, a2->trigger) == 0) &&
+				strcmp(a1->guard, a2->guard) == 0) {
+				found = 1;
+				if (strcmp(a1->behavior, a2->behavior) != 0) {
+					DEBUG("Compare action behaviors %s and %s\n", a1->behavior, a2->behavior);
+					cyberiada_compare_action_behaviors(a1->behavior, a2->behavior, compare_flags);
+				}
+				break;
+			}
+		}
+		if (!found) {
+			if (compare_flags) *compare_flags |= CYBML_DELTA_ACTION;
+			return URSULA_CHECK_NO_ERROR;
+		}
+	}
+
 	return URSULA_CHECK_NO_ERROR;
 }
 
@@ -249,7 +407,7 @@ int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* confi
 
 	cfg = fopen(config_file, "r");
 	if (!cfg) {
-		fprintf(stderr, "Cannot open config file %s\n", config_file);
+		ERROR("Cannot open config file %s\n", config_file);
 		return URSULA_CHECK_BAD_PARAMETERS;		
 	}
 	buffer = (char*)malloc(sizeof(char) * MAX_STR_LEN);
@@ -286,7 +444,7 @@ int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* confi
 				
 				res = cyberiada_read_graph_file(&(task->valid_doc), graphml);
 				if (res != URSULA_CHECK_NO_ERROR) {
-					fprintf(stderr, "Cannot read graph file %s from config: %d\n", graphml, res);
+					ERROR("Cannot read graph file %s from config: %d\n", graphml, res);
 					if(task->name) free(task->name);
 					free(task);
 					continue;
@@ -309,66 +467,64 @@ int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* confi
 	fclose(cfg);
 	free(buffer);
 
-#ifdef __DEBUG__
-	printf("Checker initialized:\n");
-	printf("Secret: %s\n", (*checker)->secret);
-	printf("Tasks:\n");
+	DEBUG("Checker initialized:\n");
+	DEBUG("Secret: %s\n", (*checker)->secret);
+	DEBUG("Tasks:\n");
 	last_task = (*checker)->tasks;
 	while (last_task) {
 		UrsulaCheckerDelta* d;
 		
-		printf("\t%s\tSM %s\n",
-			   last_task->name,
-			   last_task->valid_doc->state_machines->nodes->id);
-		printf("\tDeltas:\n");
+		DEBUG("\t%s\tSM %s\n",
+			  last_task->name,
+			  last_task->valid_doc->state_machines->nodes->id);
+		DEBUG("\tDeltas:\n");
 		d = last_task->deltas;
 		while (d) {
-			printf("\t\t%s", d->node_id);
+			DEBUG("\t\t%s", d->node_id);
 			if (d->allowed_flags) {
 				int allowed_flags = d->allowed_flags;
-				printf(" allowed: ");
+				DEBUG(" allowed: ");
 				if (allowed_flags & CYBML_DELTA_ARG) {
-					printf("A");
+					DEBUG("A");
 				}
 				if (allowed_flags & CYBML_DELTA_ORDER) {
-					printf("O");
+					DEBUG("O");
 				}
 				if (allowed_flags & CYBML_DELTA_MISS) {
-					printf("M");
+					DEBUG("M");
 				}
 				if (allowed_flags & CYBML_DELTA_EDGETO) {
-					printf("E");
+					DEBUG("E");
 				}
 				if (allowed_flags & CYBML_DELTA_ACTION) {
-					printf("C");
+					DEBUG("C");
 				}
 			}
 			if (d->required_flags) {
 				int required_flags = d->required_flags;
-				printf(" required: ");
+				DEBUG(" required: ");
 				if (required_flags & CYBML_DELTA_ARG) {
-					printf("A");
+					DEBUG("A");
 				}
 				if (required_flags & CYBML_DELTA_ORDER) {
-					printf("O");
+					DEBUG("O");
 				}
 				if (required_flags & CYBML_DELTA_MISS) {
-					printf("M");
+					DEBUG("M");
 				}
 				if (required_flags & CYBML_DELTA_EDGETO) {
-					printf("E");
+					DEBUG("E");
 				}
 				if (required_flags & CYBML_DELTA_ACTION) {
-					printf("C");
+					DEBUG("C");
 				}
 			}
-			printf("\n");
+			DEBUG("\n");
 			d = d->next;
 		}
 		last_task = last_task->next;
 	}
-	printf("\n");
-#endif
+	DEBUG("\n");
 	
 	return URSULA_CHECK_NO_ERROR;
 }
@@ -441,7 +597,7 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 	size_t i;
 	
 	if (!checker || !task_name || !program_buffer) {
-		fprintf(stderr, "Bad check program arguments!\n");
+		ERROR("Bad check program arguments!\n");
 		return URSULA_CHECK_BAD_PARAMETERS;
 	}
 
@@ -454,18 +610,17 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 		task = task->next;
 	}
 	if (!task) {
-		fprintf(stderr, "Cannot find task with name %s\n", task_name);
+		ERROR("Cannot find task with name %s\n", task_name);
 		return URSULA_CHECK_BAD_PARAMETERS;
 	}
 
-
 	if ((res = cyberiada_decode_buffer(&check_doc, program_buffer)) != URSULA_CHECK_NO_ERROR) {
-		fprintf(stderr, "Error while decoding GraphML document from buffer: %d\n", res);
+		ERROR("Error while decoding GraphML document from buffer: %d\n", res);
 		cyberiada_destroy_sm_document(check_doc);
 		return URSULA_CHECK_FORMAT_ERROR;
 	}
 
-	if (!check_doc->state_machines || check_doc->state_machines->next) {
+	if (!check_doc->state_machines || check_doc->state_machines->next || !check_doc->state_machines->nodes) {
 		/* only single SM is allowed */
 		if (result) {
 			*result = URSULA_CHECK_RESULT_ERROR;
@@ -476,6 +631,10 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 		cyberiada_destroy_sm_document(check_doc);
 		return URSULA_CHECK_NO_ERROR;		
 	}
+
+	DEBUG("Comparing graphs %s and %s\n",
+		  task->valid_doc->state_machines->nodes->id,
+		  check_doc->state_machines->nodes->id);
 	
 	res = cyberiada_check_isomorphism(task->valid_doc->state_machines,
 									  check_doc->state_machines, 1, 1,
@@ -487,7 +646,7 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 									  &sm2_new_edges_size, &sm2_new_edges,
 									  &sm1_missing_edges_size, &sm1_missing_edges);
 	if (res != CYBERIADA_NO_ERROR) {
-		fprintf(stderr, "Error while checking isomorphism: %d\n", res);
+		ERROR("Error while checking isomorphism: %d\n", res);
 		cyberiada_destroy_sm_document(check_doc);
 		if (res == CYBERIADA_BAD_PARAMETER) {			
 			return URSULA_CHECK_BAD_PARAMETERS;
@@ -495,48 +654,86 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 			return URSULA_CHECK_FORMAT_ERROR;			
 		}
 	}
-	
+
 	if (result_flags & (CYBERIADA_ISOMORPH_FLAG_IDENTICAL |
 						CYBERIADA_ISOMORPH_FLAG_EQUAL)) {
+		DEBUG("Graphs are identical/equal\n");
 		/* The presented graph is actually the same as the required */
 		if (result) {
 			*result = URSULA_CHECK_RESULT_OK;
 		}
-	} else if (result_flags & CYBERIADA_ISOMORPH_FLAG_ISOMORPHIC_MASK) {
-		
-		int diff_actions = 0;
+	} else if (result_flags & (CYBERIADA_ISOMORPH_FLAG_DIFF_INITIAL)) {
+		/* The presented graph has different edges or different initial state - not valid */
+		DEBUG("Graphs have different initial states\n");
+		if (result) {
+			*result = URSULA_CHECK_RESULT_ERROR;
+		}	
+	} else {
+		UrsulaCheckerResult r = URSULA_CHECK_RESULT_OK;
 
-		for (i = 0; i < sm_diff_nodes_size; i++) {
-			if (sm_diff_nodes_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
-				fprintf(stderr, "node %s with diff actions found!\n", sm_diff_nodes[i].n1->id);
-				diff_actions = 1;
-				break;
+		if (result_flags != CYBERIADA_ISOMORPH_FLAG_ISOMORPHIC) {
+			if (sm2_new_edges_size > 0) {
+				DEBUG("New edges found\n");
+				r = URSULA_CHECK_RESULT_ERROR;
 			}
-		}
-
-		if (!diff_actions) {
-			for (i = 0; i < sm_diff_edges_size; i++) {
-				if (sm_diff_edges_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
-					fprintf(stderr, "edge %s with diff actions found!\n", sm_diff_edges[i].e1->id);
-					diff_actions = 1;
+			for (i = 0; i < sm1_missing_nodes_size; i++) {
+				int allowed_flags = 0, required_flags = 0;
+				cyberiada_node_deltas_flags(task->deltas, sm1_missing_nodes[i]->id,
+											&allowed_flags, &required_flags);
+				if (allowed_flags & CYBML_DELTA_MISS) {
+					continue;
+				} else if (required_flags & CYBML_DELTA_MISS) {
+					DEBUG("Required missing node found\n");
+					r = URSULA_CHECK_RESULT_PARTIAL;
+				} else {
+					DEBUG("Permitted missing node found\n");
+					r = URSULA_CHECK_RESULT_ERROR;
 					break;
 				}
 			}
 		}
-		
-		if (!diff_actions) {
-			if (result) {
-				*result = URSULA_CHECK_RESULT_OK;
-			}
-		} else {
-			if (result) {
-				*result = URSULA_CHECK_RESULT_PARTIAL;
+
+		if (r != URSULA_CHECK_RESULT_ERROR) {
+			for (i = 0; i < sm_diff_nodes_size; i++) {
+				DEBUG("Found nodes %s and %s: %ld\n",
+					  sm_diff_nodes[i].n1->id,
+					  sm_diff_nodes[i].n2->id,
+					  sm_diff_nodes_flags[i]);
+				if (sm_diff_nodes_flags[i] == CYBERIADA_NODE_DIFF_TITLE) {
+					continue;
+				}
+				if (sm_diff_nodes_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
+					int allowed_flags = 0, required_flags = 0, flags = 0;
+					cyberiada_node_deltas_flags(task->deltas, sm_diff_nodes[i].n1->id,
+												&allowed_flags, &required_flags);
+					cyberiada_compare_node_actions(sm_diff_nodes[i].n1->actions,
+												   sm_diff_nodes[i].n2->actions,
+												   &flags);
+					DEBUG("Comparing node %s and %s actions: %d\n",
+						  sm_diff_nodes[i].n1->id,
+						  sm_diff_nodes[i].n2->id,
+						  flags);
+					if (flags & ~allowed_flags & ~required_flags) {
+						r = URSULA_CHECK_RESULT_ERROR;
+						break;					
+					} else if (flags & ~allowed_flags & required_flags) {
+						r = URSULA_CHECK_RESULT_PARTIAL;
+					}
+				}
 			}
 		}
-	} else {
+		
+/*		for (i = 0; i < sm_diff_edges_size; i++) {
+			if (sm_diff_edges_flags[i] & CYBERIADA_NODE_DIFF_ACTIONS) {
+				fprintf(stderr, "edge %s with diff actions found!\n", sm_diff_edges[i].e1->id);
+				diff_actions = 1;
+				break;
+			}
+			}*/
+		
 		if (result) {
-			*result = URSULA_CHECK_RESULT_ERROR;
-		}		
+			*result = r;
+		}
 	}
 
 	if (result_code) {
