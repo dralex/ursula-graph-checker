@@ -46,17 +46,17 @@
  * The internal structure
  * ----------------------------------------------------------------------------- */
 
-#define CYBML_DELTA_ARG             0x1
-#define CYBML_DELTA_ORDER           0x2
-#define CYBML_DELTA_MISS            0x4
-#define CYBML_DELTA_EDGETO          0x8
-#define CYBML_DELTA_ACTION          0x10
+#define CYBML_DELTA_ARG             CYBERIADA_ACTION_DIFF_BEHAVIOR_ARG
+#define CYBML_DELTA_ORDER           CYBERIADA_ACTION_DIFF_BEHAVIOR_ORDER
+#define CYBML_DELTA_ACTION          CYBERIADA_ACTION_DIFF_BEHAVIOR_ACTION
+#define CYBML_DELTA_MISS            0x8
+#define CYBML_DELTA_EDGETO          0x10
 
 #define CYBML_DELTA_ARG_STR         "ARG"
 #define CYBML_DELTA_ORDER_STR       "ORDER"
+#define CYBML_DELTA_ACTION_STR      "ACTION"
 #define CYBML_DELTA_MISS_STR        "MISS"
 #define CYBML_DELTA_EDGETO_STR      "EDGETO"
-#define CYBML_DELTA_ACTION_STR      "ACTION"
 
 #define CYBML_DELTA_PREFIX_ALLOWED  '+'
 #define CYBML_DELTA_PREFIX_REQUIRED '~'
@@ -269,129 +269,6 @@ static int cyberiada_node_deltas_flags(UrsulaCheckerDelta* deltas, const char* n
 	}
 
 	return URSULA_CHECK_BAD_PARAMETERS;	
-}
-
-static int cyberiada_command_arguments_differ(const char* command1, const char* command2)
-{
-	int bracket = 0;
-	DEBUG("Comparing commands with arguments %s and %s\n", command1, command2);
-	for (; *command1 && *command2; command1++, command2++) {
-		if (*command1 == *command2) {
-			if (!bracket && *command1 == '(') { 
-				bracket = 1;
-			}
-		} else if (!bracket) {
-			return 0;
-		} else {
-			return strcmp(command1, command2);
-		}
-	}
-	return 0;
-}
-
-static int cyberiada_compare_action_behaviors(const char* behavior1, const char* behavior2, int* compare_flags)
-{
-	char *buffer1 = NULL, *buffer2 = NULL;
-	char **commands1 = NULL, **commands2 = NULL;
-	size_t i, j, commands1_size = 0, commands2_size = 0;
-	char* c;
-	
-	copy_string(&buffer1, NULL, behavior1);
-	commands1_size = 1;
-	c = buffer1;
-	while (*c) {
-		if (*c == '\n') commands1_size++; 
-		c++;
-	}
-	copy_string(&buffer2, NULL, behavior2);
-	commands2_size = 1;
-	c = buffer2;
-	while (*c) {
-		if (*c == '\n') commands2_size++; 
-		c++;
-	}
-
-	if (commands1_size != commands2_size && compare_flags) {
-		*compare_flags |= CYBML_DELTA_ACTION;
-	}
-	
-	commands1 = (char**)malloc(sizeof(char*) * commands1_size);
-	commands1[0] = buffer1;
-	for (i = 1, c = buffer1; *c && i < commands1_size; c++) { 
-		if (*c == '\n') {
-			*c = 0;
-			commands1[i++] = c + 1;
-		}
-	}
-
-	commands2 = (char**)malloc(sizeof(char*) * commands2_size);
-	commands2[0] = buffer2;
-	for (i = 1, c = buffer2; *c && i < commands2_size; c++) { 
-		if (*c == '\n') {
-			*c = 0;
-			commands2[i++] = c + 1;
-		}
-	}
-
-	for (i = 0; i < commands1_size; i++) {
-		for (j = 0; j < commands2_size; j++) {
-			if (strcmp(commands1[i], commands2[j]) == 0) {
-				if (i != j && compare_flags) {
-					*compare_flags |= CYBML_DELTA_ORDER;				
-				}
-				break;
-			} else if (cyberiada_command_arguments_differ(commands1[i], commands2[j])) {
-				
-				if (compare_flags) {
-					*compare_flags |= CYBML_DELTA_ARG;
-				}
-				break;				
-			}
-		}
-	}
-	
-	if (buffer1) free(buffer1);
-	if (buffer2) free(buffer2);
-	if (commands1) free(commands1);
-	if (commands2) free(commands2);
-	
-	return URSULA_CHECK_NO_ERROR;
-}
-
-static int cyberiada_compare_node_actions(CyberiadaAction* n1action, CyberiadaAction* n2action, int* compare_flags)
-{
-	CyberiadaAction *a1, *a2;
-
-	if (!n1action && !n2action) {
-		if (compare_flags) *compare_flags = 0;
-		return URSULA_CHECK_NO_ERROR;
-	}
-	if ((n1action && !n2action) || (!n1action && n2action)) {
-		if (compare_flags) *compare_flags = CYBML_DELTA_ACTION;		
-		return URSULA_CHECK_NO_ERROR;
-	}
-
-	for (a1 = n1action; a1; a1 = a1->next) {
-		int found = 0;
-		for (a2 = n2action; a2; a2 = a2->next) {
-			if (a1->type == a2->type &&
-				(a2->type != cybActionTransition || strcmp(a1->trigger, a2->trigger) == 0) &&
-				strcmp(a1->guard, a2->guard) == 0) {
-				found = 1;
-				if (strcmp(a1->behavior, a2->behavior) != 0) {
-					DEBUG("Compare action behaviors %s and %s\n", a1->behavior, a2->behavior);
-					cyberiada_compare_action_behaviors(a1->behavior, a2->behavior, compare_flags);
-				}
-				break;
-			}
-		}
-		if (!found) {
-			if (compare_flags) *compare_flags |= CYBML_DELTA_ACTION;
-			return URSULA_CHECK_NO_ERROR;
-		}
-	}
-
-	return URSULA_CHECK_NO_ERROR;
 }
 
 int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* config_file)
@@ -655,6 +532,8 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 		}
 	}
 
+	DEBUG("Isomorphism check results: %d\n", result_flags);
+	
 	if (result_flags & (CYBERIADA_ISOMORPH_FLAG_IDENTICAL |
 						CYBERIADA_ISOMORPH_FLAG_EQUAL)) {
 		DEBUG("Graphs are identical/equal\n");
@@ -662,7 +541,7 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 		if (result) {
 			*result = URSULA_CHECK_RESULT_OK;
 		}
-	} else if (result_flags & (CYBERIADA_ISOMORPH_FLAG_DIFF_INITIAL)) {
+	} else if (result_flags & CYBERIADA_ISOMORPH_FLAG_DIFF_INITIAL) {
 		/* The presented graph has different edges or different initial state - not valid */
 		DEBUG("Graphs have different initial states\n");
 		if (result) {
@@ -672,32 +551,74 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 		UrsulaCheckerResult r = URSULA_CHECK_RESULT_OK;
 
 		if (result_flags != CYBERIADA_ISOMORPH_FLAG_ISOMORPHIC) {
-			if (sm2_new_edges_size > 0) {
-				DEBUG("New edges found\n");
-				r = URSULA_CHECK_RESULT_ERROR;
-			}
-			for (i = 0; i < sm1_missing_nodes_size; i++) {
-				int allowed_flags = 0, required_flags = 0;
-				cyberiada_node_deltas_flags(task->deltas, sm1_missing_nodes[i]->id,
-											&allowed_flags, &required_flags);
-				if (allowed_flags & CYBML_DELTA_MISS) {
-					continue;
-				} else if (required_flags & CYBML_DELTA_MISS) {
-					DEBUG("Required missing node found\n");
-					r = URSULA_CHECK_RESULT_PARTIAL;
-				} else {
-					DEBUG("Permitted missing node found\n");
+			if (sm1_missing_edges_size > 0) {
+				int permitted = 1;
+				DEBUG("Missing edges found:\n");
+				for (i = 0; i < sm1_missing_edges_size; i++) {
+					int allowed_flags, required_flags;
+					const char* source_id = sm1_missing_edges[i]->source->id;
+					const char* target_id = sm1_missing_edges[i]->target->id;
+					DEBUG("\tedge %s\n", sm1_missing_edges[i]->id);
+					allowed_flags = required_flags = 0;
+					cyberiada_node_deltas_flags(task->deltas, source_id,
+												&allowed_flags, &required_flags);
+					if (allowed_flags & CYBML_DELTA_MISS) {
+						continue;
+					} else if (required_flags & CYBML_DELTA_MISS) {
+						DEBUG("Required missing source node found\n");
+					} else {
+						DEBUG("Permitted missing source node found\n");
+						r = URSULA_CHECK_RESULT_ERROR;
+						break;
+					}
+					allowed_flags = required_flags = 0;
+					cyberiada_node_deltas_flags(task->deltas, target_id,
+												&allowed_flags, &required_flags);
+					if (allowed_flags & CYBML_DELTA_MISS) {
+						continue;
+					} else if (required_flags & CYBML_DELTA_MISS) {
+						DEBUG("Required missing target node found\n");
+					} else {
+						DEBUG("Permitted missing target node found\n");
+						r = URSULA_CHECK_RESULT_ERROR;
+						break;
+					}					
+				}
+				if (!permitted) {
 					r = URSULA_CHECK_RESULT_ERROR;
-					break;
+				} else {
+					r = URSULA_CHECK_RESULT_PARTIAL;
+				}
+			} else if (sm2_new_edges_size > 0) {
+				DEBUG("New edges found:\n");
+				for (i = 0; i < sm2_new_edges_size; i++) {
+					DEBUG("\tedge %s\n", sm2_new_edges[i]->id);
+				}
+				r = URSULA_CHECK_RESULT_ERROR;
+			} else {
+				for (i = 0; i < sm1_missing_nodes_size; i++) {
+					int allowed_flags = 0, required_flags = 0;
+					cyberiada_node_deltas_flags(task->deltas, sm1_missing_nodes[i]->id,
+												&allowed_flags, &required_flags);
+					if (allowed_flags & CYBML_DELTA_MISS) {
+						continue;
+					} else if (required_flags & CYBML_DELTA_MISS) {
+						DEBUG("Required missing node found\n");
+						r = URSULA_CHECK_RESULT_PARTIAL;
+					} else {
+						DEBUG("Permitted missing node found\n");
+						r = URSULA_CHECK_RESULT_ERROR;
+						break;
+					}
 				}
 			}
 		}
 
 		if (r != URSULA_CHECK_RESULT_ERROR) {
 			for (i = 0; i < sm_diff_nodes_size; i++) {
-				DEBUG("Found nodes %s and %s: %ld\n",
-					  sm_diff_nodes[i].n1->id,
-					  sm_diff_nodes[i].n2->id,
+				DEBUG("Found nodes %s [%s] and %s [%s]: %ld\n",
+					  sm_diff_nodes[i].n1->id, sm_diff_nodes[i].n1->title,
+					  sm_diff_nodes[i].n2->id, sm_diff_nodes[i].n2->title,
 					  sm_diff_nodes_flags[i]);
 				if (sm_diff_nodes_flags[i] == CYBERIADA_NODE_DIFF_TITLE) {
 					continue;
@@ -709,9 +630,9 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 					cyberiada_compare_node_actions(sm_diff_nodes[i].n1->actions,
 												   sm_diff_nodes[i].n2->actions,
 												   &flags);
-					DEBUG("Comparing node %s and %s actions: %d\n",
-						  sm_diff_nodes[i].n1->id,
-						  sm_diff_nodes[i].n2->id,
+					DEBUG("Comparing node %s [%s] and %s [%s] actions: %d\n",
+						  sm_diff_nodes[i].n1->id, sm_diff_nodes[i].n1->title,
+						  sm_diff_nodes[i].n2->id, sm_diff_nodes[i].n2->title,
 						  flags);
 					if (flags & ~allowed_flags & ~required_flags) {
 						r = URSULA_CHECK_RESULT_ERROR;
