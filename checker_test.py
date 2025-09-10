@@ -38,7 +38,7 @@ def generate_sha256(secret, task, salt, result):
     return h.hexdigest()
 
 def test_graph(secret, task, result, graph):
-    salt = random.randint(1, 100000)
+    salt = random.randint(1, 2147483647)
 
     print('Runnig checker {} {} with salt {}... '.format(task, graph, salt), end='')
     res, code, outstr, errstr = run_checker(task, salt, graph)
