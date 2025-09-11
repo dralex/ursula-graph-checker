@@ -85,6 +85,7 @@ int main(int argc, char** argv)
 												 &result_code);
 	if (res != URSULA_CHECK_NO_ERROR) {
 		fprintf(stderr, "Program checking error: %d\n", res);
+		printf("Result code: %d\n", result);
 	} else {
 		printf("Checking completed!\n");
 		printf("Result code: %d\n", result);

@@ -47,12 +47,13 @@ def test_graph(secret, task, result, graph):
         print("Output:\n{}\n".format(outstr))
         print("Errors:\n{}\n".format(errstr))
         sys.exit(1)
-    sha = generate_sha256(secret, task, salt, result)
-    if code != sha:
-        print("Wrong result code '{}' (expected '{}') while testing graph {}".format(code, sha, graph))
-        print("Output:\n{}\n".format(outstr))
-        print("Errors:\n{}\n".format(errstr))
-        sys.exit(1)        
+    if res != 0:
+        sha = generate_sha256(secret, task, salt, result)
+        if code != sha:
+            print("Wrong result code '{}' (expected '{}') while testing graph {}".format(code, sha, graph))
+            print("Output:\n{}\n".format(outstr))
+            print("Errors:\n{}\n".format(errstr))
+            sys.exit(1)   
     print('OK')
     
 if __name__ == '__main__':

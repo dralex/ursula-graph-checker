@@ -475,6 +475,9 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 	
 	if (!checker || !task_name || !program_buffer) {
 		ERROR("Bad check program arguments!\n");
+		if (result) {
+			*result = URSULA_CHECK_RESULT_CRITICAL;
+		}
 		return URSULA_CHECK_BAD_PARAMETERS;
 	}
 
@@ -488,24 +491,26 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 	}
 	if (!task) {
 		ERROR("Cannot find task with name %s\n", task_name);
+		if (result) {
+			*result = URSULA_CHECK_RESULT_CRITICAL;
+		}
 		return URSULA_CHECK_BAD_PARAMETERS;
 	}
 
 	if ((res = cyberiada_decode_buffer(&check_doc, program_buffer)) != URSULA_CHECK_NO_ERROR) {
 		ERROR("Error while decoding GraphML document from buffer: %d\n", res);
-		cyberiada_destroy_sm_document(check_doc);
+		if (result) {
+			*result = URSULA_CHECK_RESULT_CRITICAL;
+		}
 		return URSULA_CHECK_FORMAT_ERROR;
 	}
 
 	if (!check_doc->state_machines || check_doc->state_machines->next || !check_doc->state_machines->nodes) {
 		/* only single SM is allowed */
-		if (result) {
-			*result = URSULA_CHECK_RESULT_ERROR;
-		}
-		if (result_code) {
-			*result_code = generate_code(checker->secret, task_name, salt, *result);
-		}
 		cyberiada_destroy_sm_document(check_doc);
+		if (result) {
+			*result = URSULA_CHECK_RESULT_CRITICAL;
+		}
 		return URSULA_CHECK_NO_ERROR;		
 	}
 
@@ -525,6 +530,9 @@ int cyberiada_ursula_checker_check_program(UrsulaCheckerData* checker,
 	if (res != CYBERIADA_NO_ERROR) {
 		ERROR("Error while checking isomorphism: %d\n", res);
 		cyberiada_destroy_sm_document(check_doc);
+		if (result) {
+			*result = URSULA_CHECK_RESULT_CRITICAL;
+		}
 		if (res == CYBERIADA_BAD_PARAMETER) {			
 			return URSULA_CHECK_BAD_PARAMETERS;
 		} else {

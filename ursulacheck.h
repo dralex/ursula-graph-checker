@@ -40,9 +40,11 @@ typedef struct _UrsulaCheckerData UrsulaCheckerData;
 	
 typedef char UrsulaCheckerResult; 
 
-#define URSULA_CHECK_RESULT_ERROR   1
-#define URSULA_CHECK_RESULT_PARTIAL 2
-#define URSULA_CHECK_RESULT_OK      3
+
+#define URSULA_CHECK_RESULT_CRITICAL 0
+#define URSULA_CHECK_RESULT_ERROR    1
+#define URSULA_CHECK_RESULT_PARTIAL  2
+#define URSULA_CHECK_RESULT_OK       3
 
 /* -----------------------------------------------------------------------------
  * The library error codes
