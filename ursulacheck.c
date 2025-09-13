@@ -313,6 +313,13 @@ int cyberiada_ursula_checker_init(UrsulaCheckerData** checker, const char* confi
 			graphml++;
 
 			if (strcmp(buffer, SECRET_STRING) == 0) {
+				if ((*checker)->secret) {
+					ERROR("Trying to inialize the checker secret twice!\n");
+					free(*checker);
+					fclose(cfg);
+					free(buffer);
+					return URSULA_CHECK_BAD_PARAMETERS;
+				}
 				copy_string(&((*checker)->secret), NULL, graphml);
 			} else {
 				task = (UrsulaCheckerTask*)malloc(sizeof(UrsulaCheckerTask));
